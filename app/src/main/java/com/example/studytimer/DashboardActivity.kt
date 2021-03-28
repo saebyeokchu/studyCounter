@@ -22,7 +22,7 @@ class DashboardActivity : AppCompatActivity() {
     lateinit var timerContent : TextView
     lateinit var restTimerContent : TextView
 
-    var countDownTurnedOn : Int = 1
+    var countDownTurnedOn : Int = -1
 
     var second : Long = 0
     var restSecond : Long = 0
@@ -44,78 +44,73 @@ class DashboardActivity : AppCompatActivity() {
 
     //array -> sqlite로
     data class Journey(var index:Int,var startTime : Long,var endTime : Long,var state : TimerState,var interval : Long)
-    var tempJourneys : MutableList<Journey> = mutableListOf<Journey>()
+    var tempJourneys : MutableList<JourneyV2> = mutableListOf<JourneyV2>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.dashboard)
-        initialViewSetup()
 
-        val timerFuncs : TimerFuncs = TimerFuncs()
+        val timerFunc : TimerFuncs = TimerFuncs()
+
+        initialViewSetup()
+        initialTimeSetup()
+
+
+        //카운트다운, 카운트업 초를 진행하면서 시행되는 task
+        handlerTask = object : Runnable {
+            override fun run() {
+
+                second += countDownTurnedOn * -1
+                resetTimerContentText()
+
+                //decide proceed timer or move to nextStep
+                if(second.toInt() == 0 && countDownTurnedOn == 1) { //this session is count down and study count down done
+                    triggerTimerAction(TimerState.pauseStudy)
+                }else{
+                    handler.postDelayed(this, 1000)
+                }
+
+            }
+        }
+
+        restTimerHandlerTask = object : Runnable {
+            override fun run() {
+
+                //update timer content
+                restSecond += countDownTurnedOn * -1
+                resetRestTimerContentText()
+
+                //decide proceed timer or move to nextStep
+                if(restSecond.toInt() == 0 && countDownTurnedOn == 1) {
+                    triggerTimerAction(TimerState.startStudy)
+                }else{
+                    handler.postDelayed(this, 1000)
+                }
+
+            }
+        }
+    }
+
+    private fun initialTimeSetup(){
+
         val countdownSwitch : Switch = findViewById(R.id.countdownSwitch)
 
         if(countDownTurnedOn==-1) {//시간 올리는 버전
             countdownSwitch.isChecked = false
 
-            settedSecond = 0
-            settedRestSecond = 0
+            second = 0
+            restSecond = 0
         }else{ // 시간 내리는 버전
             countdownSwitch.isChecked = true
             //db에서 불러오기
-            settedSecond = 10
-            settedRestSecond = 10
+            second = 10
+            restSecond = 10
         }
 
-        //초기화
-        second = settedSecond
-        restSecond = settedRestSecond
-
-        timerContent.text =
-            timerFuncs.secondToStopwatchText(second, ":", ":", "", false)
-        restTimerContent.text =
-            timerFuncs.secondToStopwatchText(restSecond, ":", ":", "", false)
-
-        //카운트다운, 카운트업 초를 진행하면서 시행되는 task
-        handlerTask = object : Runnable {
-            override fun run() {
-                second += countDownTurnedOn * -1
-                val isDoneWithCountDownOption : Boolean = second.toInt() == 0 && countDownTurnedOn == 1
-
-                //0초면 자동으로 휴식으로 넘어가기
-                if( isDoneWithCountDownOption) second=settedSecond+1
-
-                timerContent.text =
-                    timerFuncs.secondToStopwatchText(second, ":", ":", "", false)
-
-                if( isDoneWithCountDownOption) {
-                    completeStudyCount++
-                    triggerTimerAction(TimerState.pause)
-                }else{
-                    handler.postDelayed(this, 1000)
-                }
-
-            }
-        }
-        restTimerHandlerTask = object : Runnable {
-            override fun run() {
-                restSecond += countDownTurnedOn * -1
-                val isDoneWithCountDownOption : Boolean = restSecond.toInt() == 0 && countDownTurnedOn == 1
-
-                //0초면 자동으로 공부로 넘어가기
-                if(isDoneWithCountDownOption) restSecond = settedRestSecond+1
-
-                restTimerContent.text =
-                    timerFuncs.secondToStopwatchText(restSecond, ":", ":", "", false)
-
-                if(isDoneWithCountDownOption) {
-                    completeRestCount++
-                    triggerTimerAction(TimerState.start)
-                }else{
-                    handler.postDelayed(this, 1000)
-                }
-
-            }
-        }
+        studySessionCount = 0
+        tempJourneys = mutableListOf<JourneyV2>()
+        resetTimerContentText()
+        resetRestTimerContentText()
     }
 
     private fun initialViewSetup(){
@@ -127,11 +122,14 @@ class DashboardActivity : AppCompatActivity() {
         stateOff = findViewById<Button>(R.id.stateOff)
         stateOn = findViewById<Button>(R.id.stateOn)
 
-        startBtn.setOnClickListener { triggerTimerAction(TimerState.start) }
-        pauseBtn.setOnClickListener{ triggerTimerAction(TimerState.pause) }
-        stopBtn.setOnClickListener{ triggerTimerAction(TimerState.stop)}
-        stateOn.setOnClickListener{ setTimerTextVisibility(TimerState.start) ; setButtonColors(TimerState.start) }
-        stateOff.setOnClickListener{ setTimerTextVisibility(TimerState.pause) ; setButtonColors(TimerState.pause)}
+        startBtn.setOnClickListener { triggerTimerAction(TimerState.startStudy) }
+        pauseBtn.setOnClickListener{ triggerTimerAction(TimerState.pauseStudy) }
+        stopBtn.setOnClickListener{ triggerTimerAction(TimerState.stopStudy)}
+        stateOn.setOnClickListener{ setTimerTextVisibility(TimerState.startStudy) ; setButtonColors(TimerState.startStudy) }
+        stateOff.setOnClickListener{ setTimerTextVisibility(TimerState.pauseStudy) ; setButtonColors(TimerState.pauseStudy)}
+
+        //한번 지우고 추가해야 하나?
+        ExpandTableLayout(DatabaseHandler(this).getTodayTimerData(TimerFuncs().GetTodayString("yyMMdd")));
     }
 
     private fun triggerTimerAction(timerState : TimerState){
@@ -143,83 +141,92 @@ class DashboardActivity : AppCompatActivity() {
 
     private fun timerAction(state : TimerState) {
 
-        if(state==TimerState.start) { //시작버튼을 눌렀으면
+        val firstStartButtonClicked : Boolean = state==TimerState.startStudy && (previousTimerState == TimerState.unknown || previousTimerState == TimerState.stopStudy)
+        val studyAgainButtonClicked : Boolean = state==TimerState.startStudy && previousTimerState == TimerState.pauseStudy
+        val pauseStudyButtonClicked : Boolean = state==TimerState.pauseStudy
+        val stopStudyButtonClicked : Boolean = state==TimerState.stopStudy
 
-            if (previousTimerState == TimerState.pause){//이전 일시정지에서
-                handler.removeCallbacks(restTimerHandlerTask)
-            }
-
-            if(!isStartDataUploaded) {//공부시간 시작데이터 초기 삽입
-                tempJourneys.add(Journey(studySessionCount, second, -1, state, -1))
-                isStartDataUploaded = true
-            }
-
+       /********************
+       처음 시작 버튼을 눌렀을때
+        *******************/
+        if(firstStartButtonClicked){
+            createNewSessionRecord()
             handler.post(handlerTask)
         }
-        else {//일시정지 혹은 정리버튼을 눌렀으면
+
+        /********************
+        쉬기 버튼을 눌렀을때
+         *******************/
+        if(pauseStudyButtonClicked){
+            handler.removeCallbacks(handlerTask)
+            handler.post(restTimerHandlerTask)
+
+            //db
+            tempJourneys[studySessionCount-1].studyEndTime = second
+            tempJourneys[studySessionCount-1].restStartTime = restSecond
+
+            //카운트 다운시 시간 체크
+            if(second.toInt() == 0 && countDownTurnedOn == 1) {
+                second = settedSecond
+                resetTimerContentText()
+            }
+
+            startBtn.text = "다시 공부하러 가기\uD83D\uDCAA"
+        }
+
+        /********************
+        다시 공부하기 버튼을 눌렀을때
+         *******************/
+        if(studyAgainButtonClicked){
+            handler.removeCallbacks(restTimerHandlerTask)
+            handler.post(handlerTask)
+
+            //db
+            tempJourneys[studySessionCount-1].restEndTime = restSecond
+            createNewSessionRecord()
+
+            //카운트 다운시 시간 체크
+            if(restSecond.toInt() == 0 && countDownTurnedOn == 1) {
+                restSecond = settedRestSecond
+                resetRestTimerContentText()
+            }
+        }
+
+        /********************
+        공부 그만하기 버튼을 눌렀을때
+         *******************/
+        if(stopStudyButtonClicked){
             handler.removeCallbacks(handlerTask)
 
-            if(state==TimerState.stop) {
-                //찾아야 함 인덱스가 studySessionCount이고 state가 start 친구들 찾아야 함
+            //db
+            tempJourneys[studySessionCount-1].studyEndTime = second
+            studySessionCount++
 
-                //휴식, 공부 데이터 업로드
-                AddToTodayStudyList()
+            //add to under table layout
+            ExpandTableLayout(TimerFuncs().resolveTimerData(countDownTurnedOn,tempJourneys,this))
 
-                //add to under table layout
-                ExpandTableLayout()
-                studySessionCount++
-
-                //초기화
-                if(countDownTurnedOn==-1) {
-                    timerContent.text = "00:00:00"
-                    second = 0
-
-                    restTimerContent.text = "00:00:00"
-                    restSecond = 0
-                }else{
-                    val timerFuncs : TimerFuncs = TimerFuncs()
-
-                    timerContent.text =
-                        timerFuncs.secondToStopwatchText(settedSecond, ":", ":", "", false)
-                    second = settedSecond
-
-                    restTimerContent.text =
-                        timerFuncs.secondToStopwatchText(settedRestSecond, ":", ":", "", false)
-                    restSecond = settedRestSecond
-                }
-
-                startBtn.text = "공부 시작하기"
-                isStartDataUploaded = false
-                isPauseDataUploaded = false
-            }else{
-                if(!isPauseDataUploaded) {//초기 휴식데이터 삽입
-                    tempJourneys.add(Journey(studySessionCount, restSecond, -1, state, -1))
-                    isPauseDataUploaded = true
-                }
-
-                handler.post(restTimerHandlerTask)
-                startBtn.text = "다시 공부하러 가기\uD83D\uDCAA"
-            }
+            //초기화
+            initialTimeSetup()
+            startBtn.text = "공부 시작하기"
         }
 
         previousTimerState = state
 
     }
 
-    private fun AddToTodayStudyList() {
-        val tempStudy : Journey? = tempJourneys.find { it.index == studySessionCount && it.state == TimerState.start}
-        tempStudy?.endTime = second
-        if(countDownTurnedOn==-1) {
-            tempStudy?.interval = (second - tempStudy!!.startTime)
-        }
-        else tempStudy?.interval = tempStudy!!.startTime - second + settedSecond*completeStudyCount
+    private fun createNewSessionRecord() {
+        studySessionCount++
+        tempJourneys.add(JourneyV2(studySessionCount, second, -1, -1, -1))
+    }
 
-        val tempRest : Journey? = tempJourneys.find { it.index == studySessionCount && it.state == TimerState.pause}
-        tempRest?.endTime = restSecond
-        if(countDownTurnedOn==-1) {
-            tempRest?.interval = restSecond - tempRest!!.startTime
-        }
-        else tempRest?.interval = tempRest!!.startTime - restSecond + settedRestSecond*completeRestCount
+    private fun resetTimerContentText() {
+        timerContent.text =
+            TimerFuncs().secondToStopwatchText(second, ":", ":", "", false)
+    }
+
+    private fun resetRestTimerContentText() {
+        restTimerContent.text =
+            TimerFuncs().secondToStopwatchText(restSecond, ":", ":", "", false)
     }
 
     private fun changeContentUI(state:TimerState) {
@@ -233,13 +240,13 @@ class DashboardActivity : AppCompatActivity() {
 
     private fun setButtonColors(state : TimerState) {
 
-        if(state==TimerState.start) {
+        if(state==TimerState.startStudy) {
             stateOn.setBackgroundColor(Color.BLACK)
             stateOn.setTextColor(Color.WHITE)
 
             stateOff.setBackgroundColor(Color.WHITE)
             stateOff.setTextColor(Color.BLACK)
-        }else if(state==TimerState.pause) {
+        }else if(state==TimerState.pauseStudy) {
             stateOff.setBackgroundColor(Color.BLACK)
             stateOff.setTextColor(Color.WHITE)
 
@@ -255,7 +262,7 @@ class DashboardActivity : AppCompatActivity() {
     }
 
     private fun setButtonVisibility(state : TimerState){
-        if(state == TimerState.start) {
+        if(state == TimerState.startStudy) {
             startBtn.visibility = View.INVISIBLE;
             pauseBtn.visibility = View.VISIBLE;
             stopBtn.visibility = View.VISIBLE;
@@ -267,7 +274,7 @@ class DashboardActivity : AppCompatActivity() {
     }
 
     private fun setTimerTextVisibility(state : TimerState){
-        if(state==TimerState.start){
+        if(state==TimerState.startStudy){
             timerContent.visibility = View.VISIBLE
             restTimerContent.visibility = View.INVISIBLE
         }else{
@@ -276,7 +283,7 @@ class DashboardActivity : AppCompatActivity() {
         }
     }
 
-    private fun ExpandTableLayout() {
+    private fun ExpandTableLayout(timeInfos : MutableList<TimerDetail>) {
         val tableLayout : TableLayout = findViewById<TableLayout>(R.id.studyLog)
         var timerFuncs : TimerFuncs = TimerFuncs()
 
@@ -285,71 +292,92 @@ class DashboardActivity : AppCompatActivity() {
             TableRow.LayoutParams.MATCH_PARENT
         )
 
-        var tempTableRow = TableRow(this)
-        var tempTableIndexTextView = TextView(this)
-        var tempTableStudyTimeTextView = TextView(this)
-        var tempTableRestTimeTextView = TextView(this)
+        timeInfos.map {
 
-        tempTableIndexTextView.gravity = Gravity.CENTER
-        tempTableStudyTimeTextView.gravity = Gravity.CENTER
-        tempTableRestTimeTextView.gravity = Gravity.CENTER
+            var tempTableRow = TableRow(this)
+            var tempTableIndexTextView = TextView(this)
+            var tempTableStudyTimeTextView = TextView(this)
+            var tempTableRestTimeTextView = TextView(this)
 
-        tempTableIndexTextView.text = studySessionCount.toString()
-        tempTableStudyTimeTextView.text =
-            timerFuncs.secondToStopwatchText(
-                tempJourneys.find { it.index == studySessionCount && it.state == TimerState.start} ?.interval!!,
-                "시",
-                "분",
-                "초",
-                true)
-        tempTableRestTimeTextView.text =
-            timerFuncs.secondToStopwatchText(
-                tempJourneys.find { it.index == studySessionCount && it.state == TimerState.pause} ?.interval!!,
-                "시",
-                "분",
-                "초",
-                true)
+            tempTableIndexTextView.gravity = Gravity.CENTER
+            tempTableStudyTimeTextView.gravity = Gravity.CENTER
+            tempTableRestTimeTextView.gravity = Gravity.CENTER
 
-        tempTableRow.addView(tempTableIndexTextView, layoutParmas)
-        tempTableRow.addView(tempTableStudyTimeTextView, layoutParmas)
-        tempTableRow.addView(tempTableRestTimeTextView, layoutParmas)
+            Log.e(it.sessionCount.toString(),it.toString())
+            tempTableIndexTextView.text = it.sessionCount.toString()
+            tempTableStudyTimeTextView.text =
+                timerFuncs.secondToStopwatchText(
+                    it.studyTime,
+                    "시",
+                    "분",
+                    "초",
+                    true)
+            tempTableRestTimeTextView.text =
+                timerFuncs.secondToStopwatchText(
+                    it.restTime,
+                    "시",
+                    "분",
+                    "초",
+                    true)
 
-        tableLayout.addView(tempTableRow)
+            /*tempTableIndexTextView.text = studySessionCount.toString()
+            tempTableStudyTimeTextView.text =
+                timerFuncs.secondToStopwatchText(
+                    tempJourneys.find { it.index == studySeionCount && it.state == TimerState.startStudy }?.interval!!,
+                    "시",
+                    "분",
+                    "초",
+                    true)
+            tempTableRestTimeTextView.text =
+                timerFuncs.secondToStopwatchText(
+                    tempJourneys.find { it.index == studySessionCount && it.state == TimerState.pauseStudy }?.interval!!,
+                    "시",
+                    "분",
+                    "초",
+                    true)*/
 
-    }
+            tempTableRow.addView(tempTableIndexTextView, layoutParmas)
+            tempTableRow.addView(tempTableStudyTimeTextView, layoutParmas)
+            tempTableRow.addView(tempTableRestTimeTextView, layoutParmas)
+
+            tableLayout.addView(tempTableRow)
+
+        }
 
 }
 
-    /*private fun StartCountdown(){
-        //24시간이 넘었으면 false
-        val remainDays: Long = Convert.ToInt64(GetReaminDays(registerDate).TotalMilliseconds)
-        Console.WriteLine("remain seconds : $remainDays")
-        return if (remainDays <= 0) {
-            false
-        } else {
-            val c = CountDown(view, remainDays, 1000)
-            c.Start()
-            true
-        }
-    }
+}
 
-    fun GetReaminDays(startDate: Date, endDate: Date): Int {
-        return (endDate.Subtract(startDate).TotalDays)
-    }
+/*private fun StartCountdown(){
+//24시간이 넘었으면 false
+val remainDays: Long = Convert.ToInt64(GetReaminDays(registerDate).TotalMilliseconds)
+Console.WriteLine("remain seconds : $remainDays")
+return if (remainDays <= 0) {
+false
+} else {
+val c = CountDown(view, remainDays, 1000)
+c.Start()
+true
+}
+}
 
-   fun GetReanDays(registerDate: string): TimeSpan? {
-        val startDate: DateTime = DateTime.Now
-        val endDate: DateTime
-        endDate = if (registerDate == "NOW") {
-            DateTime.Now.AddDays(1)
-        } else {
-            val dateInfo: Array<string> = FormatDate(registerDate)
-            val timeInfo: Array<string> = FormatTime(registerDate)
-            InitDate(dateInfo, timeInfo).AddDays(1)
-        }
-        Console.WriteLine("APP1 DEBUG : startDate => " + startDate.ToString())
-        Console.WriteLine("APP1 DEBUG : endDATE => " + endDate.ToString())
-        return endDate.Subtract(startDate)
-    }
+fun GetReaminDays(startDate: Date, endDate: Date): Int {
+return (endDate.Subtract(startDate).TotalDays)
+}
+
+fun GetReanDays(registerDate: string): TimeSpan? {
+val startDate: DateTime = DateTime.Now
+val endDate: DateTime
+endDate = if (registerDate == "NOW") {
+DateTime.Now.AddDays(1)
+} else {
+val dateInfo: Array<string> = FormatDate(registerDate)
+val timeInfo: Array<string> = FormatTime(registerDate)
+InitDate(dateInfo, timeInfo).AddDays(1)
+}
+Console.WriteLine("APP1 DEBUG : startDate => " + startDate.ToString())
+Console.WriteLine("APP1 DEBUG : endDATE => " + endDate.ToString())
+return endDate.Subtract(startDate)
+}
 
 }*/
