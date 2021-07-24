@@ -1,5 +1,5 @@
 package com.example.studytimer
 
-enum class StudyState {
+enum class State_CurrentStudyDoing {
     Studying, Resting
 }

@@ -1,6 +1,7 @@
 package com.example.studytimer
 
 import android.graphics.Color
+import android.opengl.Visibility
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -9,8 +10,11 @@ import android.view.Gravity
 import android.view.View
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
+import kotlinx.android.synthetic.main.dashboard.*
 
-
+/* variables
+    studySessionCount :
+ */
 class DashboardActivity : AppCompatActivity() {
 
     private lateinit var startBtn: Button
@@ -18,6 +22,9 @@ class DashboardActivity : AppCompatActivity() {
     private lateinit var stopBtn: Button
     private lateinit var stateOff: Button
     private lateinit var stateOn: Button
+
+    private lateinit var studyLogView : TableLayout
+    private lateinit var noDataExistText : TextView
 
     lateinit var timerContent : TextView
     lateinit var restTimerContent : TextView
@@ -32,6 +39,7 @@ class DashboardActivity : AppCompatActivity() {
     var studySessionCount : Int = 0
     var completeStudyCount : Int = 0
     var completeRestCount : Int = 0
+    var startSessionForThisSession : Int = 0
 
     var isPauseDataUploaded : Boolean = false
     var isStartDataUploaded : Boolean = false
@@ -43,7 +51,6 @@ class DashboardActivity : AppCompatActivity() {
     var previousTimerState : TimerState = TimerState.unknown
 
     //array -> sqlite로
-    data class Journey(var index:Int,var startTime : Long,var endTime : Long,var state : TimerState,var interval : Long)
     var tempJourneys : MutableList<JourneyV2> = mutableListOf<JourneyV2>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -52,8 +59,10 @@ class DashboardActivity : AppCompatActivity() {
 
         val timerFunc : TimerFuncs = TimerFuncs()
 
+        //AWS에 새벽 2시마다 로그인 했을경우 데이터베이스에 자동으로 삽입하는 부분 구현합시다
         initialViewSetup()
         initialTimeSetup()
+        initialActionSetup()
 
 
         //카운트다운, 카운트업 초를 진행하면서 시행되는 task
@@ -91,6 +100,37 @@ class DashboardActivity : AppCompatActivity() {
         }
     }
 
+    private fun initialViewSetup(){
+        timerContent = findViewById(R.id.timerContent)
+        restTimerContent = findViewById(R.id.restTimerContent)
+        startBtn = findViewById<Button>(R.id.start)
+        pauseBtn = findViewById<Button>(R.id.pause)
+        stopBtn = findViewById<Button>(R.id.stop)
+        stateOff = findViewById<Button>(R.id.stateOff)
+        stateOn = findViewById<Button>(R.id.stateOn)
+
+        noDataExistText = findViewById<TextView>(R.id.noDataExistAlert)
+        studyLogView = findViewById<TableLayout>(R.id.studyLog)
+
+        startBtn.setOnClickListener { triggerTimerAction(TimerState.startStudy) }
+        pauseBtn.setOnClickListener{ triggerTimerAction(TimerState.pauseStudy) }
+        stopBtn.setOnClickListener{ triggerTimerAction(TimerState.stopStudy)}
+        //stateOn.setOnClickListener{ setTimerTextVisibility(TimerState.startStudy) ; setButtonColors(TimerState.startStudy) }
+        //stateOff.setOnClickListener{ setTimerTextVisibility(TimerState.pauseStudy) ; setButtonColors(TimerState.pauseStudy)}
+
+        //한번 지우고 추가해야 하나?
+        ExpandTodayStudyLogTableLayout(DatabaseHandler(this).getTodayTimerData(TimerFuncs().GetTodayString("yyMMdd")));
+    }
+
+
+    private fun initialActionSetup() {
+        //set dynamic actions
+
+        //can't click state buttons
+        stateOn.isEnabled = false;
+        stateOff.isEnabled = false;
+    }
+
     private fun initialTimeSetup(){
 
         val countdownSwitch : Switch = findViewById(R.id.countdownSwitch)
@@ -113,24 +153,6 @@ class DashboardActivity : AppCompatActivity() {
         resetRestTimerContentText()
     }
 
-    private fun initialViewSetup(){
-        timerContent = findViewById(R.id.timerContent)
-        restTimerContent = findViewById(R.id.restTimerContent)
-        startBtn = findViewById<Button>(R.id.start)
-        pauseBtn = findViewById<Button>(R.id.pause)
-        stopBtn = findViewById<Button>(R.id.stop)
-        stateOff = findViewById<Button>(R.id.stateOff)
-        stateOn = findViewById<Button>(R.id.stateOn)
-
-        startBtn.setOnClickListener { triggerTimerAction(TimerState.startStudy) }
-        pauseBtn.setOnClickListener{ triggerTimerAction(TimerState.pauseStudy) }
-        stopBtn.setOnClickListener{ triggerTimerAction(TimerState.stopStudy)}
-        stateOn.setOnClickListener{ setTimerTextVisibility(TimerState.startStudy) ; setButtonColors(TimerState.startStudy) }
-        stateOff.setOnClickListener{ setTimerTextVisibility(TimerState.pauseStudy) ; setButtonColors(TimerState.pauseStudy)}
-
-        //한번 지우고 추가해야 하나?
-        ExpandTableLayout(DatabaseHandler(this).getTodayTimerData(TimerFuncs().GetTodayString("yyMMdd")));
-    }
 
     private fun triggerTimerAction(timerState : TimerState){
 
@@ -146,8 +168,8 @@ class DashboardActivity : AppCompatActivity() {
         val pauseStudyButtonClicked : Boolean = state==TimerState.pauseStudy
         val stopStudyButtonClicked : Boolean = state==TimerState.stopStudy
 
-       /********************
-       처음 시작 버튼을 눌렀을때
+        /********************
+        처음 시작 버튼을 눌렀을때
         *******************/
         if(firstStartButtonClicked){
             createNewSessionRecord()
@@ -193,7 +215,7 @@ class DashboardActivity : AppCompatActivity() {
         }
 
         /********************
-        공부 그만하기 버튼을 눌렀을때
+        공부 그만하기(종료) 버튼을 눌렀을때
          *******************/
         if(stopStudyButtonClicked){
             handler.removeCallbacks(handlerTask)
@@ -203,7 +225,7 @@ class DashboardActivity : AppCompatActivity() {
             studySessionCount++
 
             //add to under table layout
-            ExpandTableLayout(TimerFuncs().resolveTimerData(countDownTurnedOn,tempJourneys,this))
+            ExpandTodayStudyLogTableLayout(TimerFuncs().resolveTimerData(countDownTurnedOn,tempJourneys,this))
 
             //초기화
             initialTimeSetup()
@@ -215,6 +237,7 @@ class DashboardActivity : AppCompatActivity() {
     }
 
     private fun createNewSessionRecord() {
+        //count 횟수
         studySessionCount++
         tempJourneys.add(JourneyV2(studySessionCount, second, -1, -1, -1))
     }
@@ -259,6 +282,7 @@ class DashboardActivity : AppCompatActivity() {
             stateOff.setBackgroundColor(Color.WHITE)
             stateOff.setTextColor(Color.BLACK)
         }
+
     }
 
     private fun setButtonVisibility(state : TimerState){
@@ -283,14 +307,27 @@ class DashboardActivity : AppCompatActivity() {
         }
     }
 
-    private fun ExpandTableLayout(timeInfos : MutableList<TimerDetail>) {
-        val tableLayout : TableLayout = findViewById<TableLayout>(R.id.studyLog)
+    private fun ExpandTodayStudyLogTableLayout(timeInfos : MutableList<TimerDetail>) {
+
         var timerFuncs : TimerFuncs = TimerFuncs()
 
         var layoutParmas = TableRow.LayoutParams(
             TableRow.LayoutParams.MATCH_PARENT,
             TableRow.LayoutParams.MATCH_PARENT
         )
+
+        //set initial view state : show pre reserved data or not
+        if(timeInfos.count()==0){
+            studyLogView.visibility = View.INVISIBLE
+
+            noDataExistText.visibility = View.VISIBLE
+            noDataExistText.text = "아직 공부를 시작하지 않으셨네요.\n시작하기 버튼을 눌러서 공부를\n시작해 보세요!"
+            return;
+        }else{
+            noDataExistText.visibility = View.INVISIBLE
+            studyLogView.visibility = View.VISIBLE
+        }
+
 
         timeInfos.map {
 
@@ -304,7 +341,8 @@ class DashboardActivity : AppCompatActivity() {
             tempTableRestTimeTextView.gravity = Gravity.CENTER
 
             Log.e(it.sessionCount.toString(),it.toString())
-            tempTableIndexTextView.text = it.sessionCount.toString()
+            tempTableIndexTextView.text = startSessionForThisSession.toString();
+            //tempTableIndexTextView.text = it.sessionCount.toString()
             tempTableStudyTimeTextView.text =
                 timerFuncs.secondToStopwatchText(
                     it.studyTime,
@@ -340,44 +378,44 @@ class DashboardActivity : AppCompatActivity() {
             tempTableRow.addView(tempTableStudyTimeTextView, layoutParmas)
             tempTableRow.addView(tempTableRestTimeTextView, layoutParmas)
 
-            tableLayout.addView(tempTableRow)
+            studyLogView.addView(tempTableRow)
 
-        }
+    }
+
+    }
 
 }
 
-}
+    /*private fun StartCountdown(){
+    //24시간이 넘었으면 false
+    val remainDays: Long = Convert.ToInt64(GetReaminDays(registerDate).TotalMilliseconds)
+    Console.WriteLine("remain seconds : $remainDays")
+    return if (remainDays <= 0) {
+    false
+    } else {
+    val c = CountDown(view, remainDays, 1000)
+    c.Start()
+    true
+    }
+    }
 
-/*private fun StartCountdown(){
-//24시간이 넘었으면 false
-val remainDays: Long = Convert.ToInt64(GetReaminDays(registerDate).TotalMilliseconds)
-Console.WriteLine("remain seconds : $remainDays")
-return if (remainDays <= 0) {
-false
-} else {
-val c = CountDown(view, remainDays, 1000)
-c.Start()
-true
-}
-}
+    fun GetReaminDays(startDate: Date, endDate: Date): Int {
+    return (endDate.Subtract(startDate).TotalDays)
+    }
 
-fun GetReaminDays(startDate: Date, endDate: Date): Int {
-return (endDate.Subtract(startDate).TotalDays)
-}
+    fun GetReanDays(registerDate: string): TimeSpan? {
+    val startDate: DateTime = DateTime.Now
+    val endDate: DateTime
+    endDate = if (registerDate == "NOW") {
+    DateTime.Now.AddDays(1)
+    } else {
+    val dateInfo: Array<string> = FormatDate(registerDate)
+    val timeInfo: Array<string> = FormatTime(registerDate)
+    InitDate(dateInfo, timeInfo).AddDays(1)
+    }
+    Console.WriteLine("APP1 DEBUG : startDate => " + startDate.ToString())
+    Console.WriteLine("APP1 DEBUG : endDATE => " + endDate.ToString())
+    return endDate.Subtract(startDate)
+    }
 
-fun GetReanDays(registerDate: string): TimeSpan? {
-val startDate: DateTime = DateTime.Now
-val endDate: DateTime
-endDate = if (registerDate == "NOW") {
-DateTime.Now.AddDays(1)
-} else {
-val dateInfo: Array<string> = FormatDate(registerDate)
-val timeInfo: Array<string> = FormatTime(registerDate)
-InitDate(dateInfo, timeInfo).AddDays(1)
-}
-Console.WriteLine("APP1 DEBUG : startDate => " + startDate.ToString())
-Console.WriteLine("APP1 DEBUG : endDATE => " + endDate.ToString())
-return endDate.Subtract(startDate)
-}
-
-}*/
+    }*/

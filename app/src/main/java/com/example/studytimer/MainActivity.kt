@@ -48,9 +48,7 @@ class MainActivity : AppCompatActivity() {
         body.text = title
         val goto_register = dialog.findViewById(R.id.register_btn) as Button
         val goto_dashboard = dialog.findViewById(R.id.goto_dashboard_btn) as TextView
-        goto_register.setOnClickListener {
-            dialog.dismiss()
-        }
+        goto_register.setOnClickListener { dialog.dismiss() }
         goto_dashboard.setOnClickListener { goToDashboard() }
         dialog.show()
 

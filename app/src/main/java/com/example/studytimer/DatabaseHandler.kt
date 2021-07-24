@@ -67,6 +67,8 @@ class DatabaseHandler(var context: Context) : SQLiteOpenHelper(context, Database
     }
 
     fun getTodayTimerDataLength(counterCode : String) : Int {
+
+        //210724 Does counter code mean date?
         val list : MutableList<TimerDetail> = ArrayList()
         val database = this.readableDatabase
         val query = "Select * from $TableName where counterCode=$counterCode"
@@ -102,6 +104,10 @@ class DatabaseHandler(var context: Context) : SQLiteOpenHelper(context, Database
         var result = database.delete(TableName,null,null)
 
         Log.e("delete result",result.toString())
+
+    }
+
+    fun addTodayDataToServer() {
 
     }
 
