@@ -37,9 +37,9 @@ class DashboardActivity : AppCompatActivity() {
     var settedRestSecond : Long = 0
 
     var studySessionCount : Int = 0
+    var studyInterval : Int = 0
     var completeStudyCount : Int = 0
     var completeRestCount : Int = 0
-    var startSessionForThisSession : Int = 0
 
     var isPauseDataUploaded : Boolean = false
     var isStartDataUploaded : Boolean = false
@@ -147,6 +147,7 @@ class DashboardActivity : AppCompatActivity() {
             restSecond = 10
         }
 
+        Log.d("find me","interval : ${studyInterval} , totalNumOfSession : ${studySessionCount}")
         studySessionCount = 0
         tempJourneys = mutableListOf<JourneyV2>()
         resetTimerContentText()
@@ -237,7 +238,8 @@ class DashboardActivity : AppCompatActivity() {
     }
 
     private fun createNewSessionRecord() {
-        //count 횟수
+        studyInterval++;
+        //count 횟수 인터벌 거기서 가지고 오기
         studySessionCount++
         tempJourneys.add(JourneyV2(studySessionCount, second, -1, -1, -1))
     }
@@ -341,8 +343,8 @@ class DashboardActivity : AppCompatActivity() {
             tempTableRestTimeTextView.gravity = Gravity.CENTER
 
             Log.e(it.sessionCount.toString(),it.toString())
-            tempTableIndexTextView.text = startSessionForThisSession.toString();
-            //tempTableIndexTextView.text = it.sessionCount.toString()
+            //tempTableIndexTextView.text = startSessionForThisSession.toString();
+            tempTableIndexTextView.text = it.sessionCount.toString()
             tempTableStudyTimeTextView.text =
                 timerFuncs.secondToStopwatchText(
                     it.studyTime,
